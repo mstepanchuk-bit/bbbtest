@@ -16,6 +16,17 @@
      решает "открыть апку / кинуть в стор", это его сильная часть
      и ATT на нее не влияет (ATT ломает только attribution-матчинг). -->
 
+<!-- ВРЕМЕННО для дебага: если что-то падает - покажем прямо на экране,
+     вместо тихого зависания. Убрать перед боевым использованием. -->
+<div id="debugError" style="position:fixed;top:0;left:0;right:0;padding:12px;font:12px monospace;color:#c00;background:#fee;white-space:pre-wrap;word-break:break-all;z-index:9999;display:none;"></div>
+<script>
+  window.onerror = function(msg, url, line, col, err) {
+    var el = document.getElementById('debugError');
+    el.style.display = 'block';
+    el.textContent += 'JS ERROR: ' + msg + ' (line ' + line + ')\n';
+  };
+</script>
+
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
@@ -39,8 +50,14 @@ const ONELINK_BASE_URL = "https://bubibo.onelink.me/TEm4/f9qp6up0";
 const CAMPAIGN_ID = new URLSearchParams(window.location.search).get('campaign') || 'program_xyz';
 // ==========================================
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+let db = null;
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+} catch (e) {
+  // Firebase SDK не загрузился/не инициализировался - не блокируем редирект,
+  // просто не будет fingerprint-записи в этом заходе
+}
 
 function getWebGLRenderer() {
   try {
@@ -96,17 +113,33 @@ function buildOnelinkUrl(clickId) {
   // 1) Пишем fingerprint в Firestore. Fire-and-forget - не ждем ответа,
   //    чтобы не задерживать переход в OneLink ни на миллисекунду.
   try {
-    db.collection('attribution_clicks').doc(clickId)
-      .set(collectFingerprint(clickId))
-      .catch(function() {});
+    if (db) {
+      db.collection('attribution_clicks').doc(clickId)
+        .set(collectFingerprint(clickId))
+        .catch(function() {});
+    }
   } catch (e) {
-    // Firebase не инициализировался (например конфиг не заполнен) - не блокируем редирект
+    // не блокируем редирект из-за проблем с Firestore
   }
 
   // 2) Сразу передаем управление AppsFlyer OneLink - дальше решает он:
   //    апка есть -> открывает ее; апки нет -> кидает в App Store/Google Play.
-  window.location.replace(buildOnelinkUrl(clickId));
-})();
+  var target = ONELINK_BASE_URL;
+  try {
+    target = buildOnelinkUrl(clickId);
+  } catch (e) {
+    // если построение URL с параметрами почему-то упало -
+    // все равно уходим хотя бы на голый OneLink, чем зависать на белом экране
+  }
+
+  // Небольшая пауза ВРЕМЕННО для дебага - чтобы успеть увидеть красную
+  // панель с ошибкой сверху, если что-то падает. Убрать перед боем
+  // (заменить на прямой window.location.replace(target) без setTimeout).
+  setTimeout(function() {
+    window.location.replace(target);
+  }, 400);
+  })();
+
 </script>
 
 </body>
